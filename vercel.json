@@ -10,6 +10,5 @@
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/start-bot.ts" },
     { "src": "/(.*)", "dest": "/public/index.html" }
-  ],
-  "buildCommand": "npm run example"
+  ]
 }
