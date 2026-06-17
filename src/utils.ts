@@ -6,10 +6,6 @@ import crypto from 'crypto';
 import mime from 'mime-types';
 import { extname } from 'path';
 import ffmpeg from 'fluent-ffmpeg';
-
-
-import sharp from 'sharp';
-import { readFile } from 'fs';
 import qr from 'qr-image';
 
 
@@ -26,7 +22,26 @@ interface HttpResponse {
 
 const utils = {
     formatPhone: (contact: string, full: boolean = false): string => {
-        let domain = contact.includes('@g.us') ? '@g.us' : '@s.whatsapp.net';
+        if (!contact) return '';
+        
+        // Handle linked devices (@lid format - WhatsApp Business linked devices)
+        // Format: 123456789@lid or 123456789@lid@s.whatsapp.net
+        if (contact.includes('@lid')) {
+            // Already has full format
+            if (contact.includes('@lid@s.whatsapp.net')) {
+                return contact;
+            }
+            // Just @lid, need to keep it as-is for sending back
+            return contact;
+        }
+        
+        // Handle group chats
+        if (contact.includes('@g.us')) {
+            return contact;
+        }
+        
+        // Handle regular phone numbers
+        let domain = '@s.whatsapp.net';
         contact = contact.replace(domain, '');
         return !full ? `${contact}${domain}` : contact;
     },
@@ -158,31 +173,7 @@ const utils = {
             })
 
         await writeFilePromise()
-        await utils.cleanImage(PATH_QR)
-    },
-
-    cleanImage: async (FROM: string): Promise<boolean> => {
-        const readBuffer = async (): Promise<Buffer> => {
-            const data = await fsPromises.readFile(FROM)
-            return Buffer.from(data)
-        }
-
-        const imgBuffer: Buffer = await readBuffer()
-
-        return new Promise((resolve, reject) => {
-            sharp(imgBuffer, { failOnError: false })
-                .extend({
-                    top: 15,
-                    bottom: 15,
-                    left: 15,
-                    right: 15,
-                    background: { r: 255, g: 255, b: 255, alpha: 1 },
-                })
-                .toFile(FROM, (err) => {
-                    if (err) reject(err)
-                    resolve(true)
-                })
-        })
+        return true
     }
 
 

@@ -1,12 +1,18 @@
 {
   "name": "@bot-wa/bot-wa-baileys",
-  "version": "1.1.5",
-  "description": "Creacte a bot for whatsapp with baileys library or bot-whatsapp",
+  "version": "2.0.0",
+  "description": "WhatsApp chatbot with flow engine for picky eater education",
   "main": "lib/baileys.js",
   "types": "lib/baileys.d.ts",
   "scripts": {
     "build": "tsc",
-    "example": "tsc && node -r ts-node/register examples/bot.ts"
+    "start": "tsc && node examples/bot.ts",
+    "dev": "ts-node examples/bot.ts",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "docker:restart": "docker-compose restart"
   },
   "repository": {
     "type": "git",
@@ -26,9 +32,12 @@
   ],
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
-    "@vercel/node": "^3.2.24",
     "@whiskeysockets/baileys": "^6.7.9",
+    "express": "^4.18.2",
     "fluent-ffmpeg": "^2.1.3",
+    "mime-types": "^2.1.35",
+    "node-cache": "^5.1.2",
+    "pino": "^8.16.2",
     "qr-image": "^3.2.0",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
@@ -41,6 +50,7 @@
   },
   "homepage": "https://github.com/Rafi-Hariman/lib-bot-whatsapp-ts#readme",
   "devDependencies": {
+    "@types/express": "^4.17.21",
     "@types/fluent-ffmpeg": "^2.1.26",
     "@types/mime-types": "^2.1.4",
     "@types/node": "^22.7.8",

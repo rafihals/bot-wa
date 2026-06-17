@@ -1,168 +1,265 @@
-# Bot Baileys
+# WhatsApp Picky Eater Education Chatbot
 
-This repository contains a WhatsApp bot implemented in JavaScript using the [@whiskeysockets/baileys](https://github.com/WhiskeySockets/Baileys) library.
+Educational chatbot for mothers dealing with picky eater children. Built with Baileys WhatsApp library and flow-based conversation engine.
 
-## baileys.js
+## Features
 
-This file is a JavaScript module that exports the `BaileysClass`, which extends `EventEmitter`. This class has several methods for sending different types of messages through WhatsApp, such as text, images, videos, audios, files, buttons, polls, locations, contacts, and stickers.
+- 🌸 Supportive educational content for mothers
+- 🤖 Flow-based conversation management
+- 💾 Persistent session storage
+- 📊 Interactive polls and menus
+- 🐳 Docker deployment ready
+- 🔄 Auto-reconnection on disconnect
 
+## Architecture
 
-## Install
-
-Use the stable version:
 ```
-npm i @bot-wa/bot-wa-baileys
+┌─────────────────────────────────────┐
+│     Docker Container                │
+├─────────────────────────────────────┤
+│  Express Server (:3000)             │
+│  ├─ /health - Health check          │
+│  ├─ /qr - QR code display           │
+│  └─ /status - Bot status            │
+│                                      │
+│  Flow Engine (State Machine)        │
+│  ├─ Menu navigation                 │
+│  ├─ Educational content             │
+│  └─ Response handling               │
+│                                      │
+│  State Manager (File-based)         │
+│  └─ Persistent user sessions        │
+│                                      │
+│  Baileys WhatsApp Client            │
+│  └─ WebSocket connection            │
+└─────────────────────────────────────┘
 ```
 
-Then import your code using:
-``` ts 
-import { BaileysClass } from '@bot-wa/bot-wa-baileys'
+## Quick Start
+
+### Using Docker (Recommended)
+
+1. **Build and start the container**
+```bash
+npm run docker:build
+npm run docker:up
 ```
-``` js 
-const { BaileysClass } = require('@bot-wa/bot-wa-baileys');
+
+2. **View QR code**
+Open http://localhost:3000/qr in your browser and scan with WhatsApp.
+
+3. **View logs**
+```bash
+npm run docker:logs
 ```
 
-## Example
+4. **Stop the container**
+```bash
+npm run docker:down
+```
 
-Follow these steps to deploy the application:
+### Local Development
 
-- Clone this repository: `https://github.com/andresayac/bot-wa-baileys.git`
-- Enter the `bot-wa-baileys` directory
-- Run the command `pnpm i`
-- Run the command `pnpm run example` to start the bot
-- Scan the QR code in WhatsApp as if it were WhatsApp Web. You can find the QR code in `qr.png` or terminal
-- Done!
+1. **Install dependencies**
+```bash
+npm install
+```
 
-### Key Methods
+2. **Build TypeScript**
+```bash
+npm run build
+```
 
-- `initBailey`: Initializes the connection with WhatsApp.
-- `setUpBaileySock`: Sets up the connection socket with WhatsApp.
-- `handleConnectionUpdate`: Handles updates to the connection with WhatsApp.
-- `busEvents`: Defines various events that the bot can handle.
-- `sendMessage`, `sendMedia`, `sendImage`, `sendVideo`, `sendAudio`, `sendText`, `sendFile`, `sendPoll`, `sendLocation`, `sendContact`, `sendPresenceUpdate`, `sendSticker`: Methods for sending different types of messages through WhatsApp.
+3. **Start the bot**
+```bash
+npm start
+```
 
-### Deprecated Methods
-- `sendButtons`: It will be removed in the next update
+4. **Development mode with auto-reload**
+```bash
+npm run dev
+```
 
-#### Method Parameters
+## Project Structure
 
-- `sendMessage(numberIn, message, options)`: Sends a message to a given phone number. The message can include additional options like buttons or media.
-- `sendMedia(number, mediaUrl, text)`: Sends media to a given phone number. The media is specified by a URL, and additional text can be sent along with the media.
-- `sendImage(number, filePath, text)`: Sends an image to a given phone number. The image is specified by a file path, and additional text can be sent along with the image.
-- `sendVideo(number, filePath, text)`: Sends a video to a given phone number. The video is specified by a file path, and additional text can be sent along with the video.
-- `sendAudio(number, audioUrl)`: Sends audio to a given phone number. The audio is specified by a URL.
-- `sendText(number, message)`: Sends a text message to a given phone number.
-- `sendFile(number, filePath)`: Sends a file to a given phone number. The file is specified by a file path.
-- `sendPoll(number, text, poll)`: Sends a poll to a given phone number. The poll options are displayed along with a given text.
-- `sendLocation(remoteJid, latitude, longitude, messages)`: Sends a location to a given chat ID. The location is specified by latitude and longitude, and additional messages can be sent along with the location.
-- `sendContact(remoteJid, contactNumber, displayName, messages)`: Sends a contact to a given chat ID. The contact is specified by a phone number and a display name, and additional messages can be sent along with the contact.
-- `sendPresenceUpdate(remoteJid, WAPresence)`: Sends a presence update (e.g., "recording") to a given chat ID.
-- `sendSticker(remoteJid, url, stickerOptions, messages)`: Sends a sticker to a given chat ID. The sticker is specified by a URL, and additional messages can be sent along with the sticker.
+```
+bot-wa/
+├── src/
+│   ├── baileys.ts          # WhatsApp client wrapper
+│   ├── flow-engine.ts      # Conversation flow state machine
+│   ├── state-manager.ts    # Persistent session storage
+│   ├── server.ts           # Express web server
+│   └── utils.ts            # Utility functions
+├── examples/
+│   └── bot.ts              # Main bot entry point
+├── public/
+│   └── index.html          # QR code display (auto-generated)
+├── state/
+│   └── user_sessions.json  # Persistent user sessions
+├── auth_info_baileys/      # WhatsApp authentication
+├── Dockerfile              # Multi-stage Docker build
+├── docker-compose.yml      # Container orchestration
+└── package.json
+```
 
-Please note that these methods are asynchronous, meaning they return a promise that resolves once the action is completed.
+## Conversation Flow
 
+The chatbot implements a comprehensive educational flow:
 
-### Usage QR CODE
+### Main Menu
+1. What is a picky eater?
+2. My child has difficulty eating
+3. I'm worried & confused
+4. Easy initial tips
+5. Need immediate help
 
-Here is an example of how to use the `BaileysClass`:
+### Educational Topics
+- **Causes** of picky eating (sensory, parenting, experience, genetics)
+- **Characteristics** (picky behavior patterns)
+- **Impact** on nutrition and stunting risk
+- **Strategies** (6 practical daily tips)
+- **Stunting relationship**
 
-```javascript
-import {BaileysClass} from '@bot-wa/bot-wa-baileys';
+### Difficulty Handling
+- Child refuses to eat
+- Eats very little
+- Only wants certain foods
+- Slow/distracted eating
 
-const botBaileys = new BaileysClass({});
+Each path provides empathetic, actionable guidance.
 
-botBaileys.on('auth_failure', async (error) => console.log("ERROR BOT: ", error));
-botBaileys.on('qr', (qr) => console.log("NEW QR CODE: ", qr));
-botBaileys.on('ready', async () => console.log('READY BOT'))
+## Configuration
 
-let awaitingResponse = false;
+### Environment Variables
 
-botBaileys.on('message', async (message) => {
-    if (!awaitingResponse) {
-        await botBaileys.sendPoll(message.from, 'Select an option', {
-            options: ['text', 'media', 'file', 'sticker'],
-            multiselect: false
-        });
-        awaitingResponse = true;
-    } else {
-        const command = message.body.toLowerCase().trim();
-        switch (command) {
-            case 'text':
-                await botBaileys.sendText(message.from, 'Hello world');
-                break;
-            case 'media':
-                await botBaileys.sendMedia(message.from, 'https://www.w3schools.com/w3css/img_lights.jpg', 'Hello world');
-                break;
-            case 'file':
-                await botBaileys.sendFile(message.from, 'https://github.com/pedrazadixon/sample-files/raw/main/sample_pdf.pdf');
-                break;
-            case 'sticker':
-                await botBaileys.sendSticker(message.from, 'https://gifimgs.com/animations/anime/dragon-ball-z/Goku/goku_34.gif', { pack: 'User', author: 'Me' });
-                break;
-            default:
-                await botBaileys.sendText(message.from, 'Sorry, I did not understand that command. Please select an option from the poll.');
-                break;
-        }
-        awaitingResponse = false;
-    }
+Create `.env` file (optional):
+```bash
+NODE_ENV=production
+DEBUG=false
+PORT=3000
+```
+
+### Docker Volumes
+
+Persistent data stored in:
+- `./auth_info_baileys` - WhatsApp session
+- `./state` - User conversation state
+- `./public` - QR code and web assets
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check (returns 200 OK) |
+| `/qr` | GET | Display QR code for authentication |
+| `/status` | GET | Bot status and metrics |
+| `/` | GET | Redirects to /qr |
+
+## Monitoring
+
+### Health Check
+```bash
+curl http://localhost:3000/health
+```
+
+### Bot Status
+```bash
+curl http://localhost:3000/status
+```
+
+### Docker Logs
+```bash
+docker-compose logs -f whatsapp-chatbot
+```
+
+## Session Management
+
+- **Auto-save**: User sessions saved every 30 seconds
+- **Timeout**: Inactive sessions expire after 24 hours
+- **Persistence**: Survives container restarts
+- **Per-user**: Each WhatsApp number has isolated state
+
+## Troubleshooting
+
+### QR Code Not Appearing
+1. Check if bot is running: `docker-compose ps`
+2. View logs: `npm run docker:logs`
+3. Restart container: `npm run docker:restart`
+
+### Authentication Issues
+1. Delete session: `rm -rf auth_info_baileys`
+2. Restart bot
+3. Scan new QR code
+
+### Container Won't Start
+1. Check port 3000 is available: `lsof -i :3000`
+2. Rebuild image: `npm run docker:build`
+3. Check logs for errors
+
+## Development
+
+### Adding New Flow Nodes
+
+Edit `src/flow-engine.ts`:
+
+```typescript
+this.addNode({
+  id: 'new_node',
+  message: 'Your message here',
+  type: 'poll',
+  options: ['Option 1', 'Option 2'],
+  next: {
+    'option 1': 'next_node_id',
+    'option 2': 'another_node_id'
+  }
 });
 ```
 
-### Usage Pairing Code
+### Modifying Responses
 
-Here is an example of how to use the `BaileysClass`:
+All educational content is embedded in the flow engine. Edit the `initializeFlows()` method to update messages.
 
-```javascript
-import {BaileysClass} from '@bot-wa/bot-wa-baileys';
+## Tech Stack
 
-const botBaileys = new BaileysClass({ usePairingCode: true, phoneNumber: 'XXXXXXXXXXX' });
+- **Node.js 20** - Runtime
+- **TypeScript** - Type safety
+- **Baileys** - WhatsApp Web API
+- **Express** - Web server
+- **Docker** - Containerization
+- **Alpine Linux** - Minimal base image
 
-botBaileys.on('auth_failure', async (error) => console.log("ERROR BOT: ", error));
-botBaileys.on('pairing_code', (code) => console.log("NEW PAIRING CODE: ", code));
-botBaileys.on('ready', async () => console.log('READY BOT'))
+## Security
 
-let awaitingResponse = false;
+- No database credentials (file-based storage)
+- Session data not exposed via API
+- Health check doesn't leak sensitive data
+- Authentication handled by WhatsApp
 
-botBaileys.on('message', async (message) => {
-    if (!awaitingResponse) {
-        await botBaileys.sendPoll(message.from, 'Select an option', {
-            options: ['text', 'media', 'file', 'sticker'],
-            multiselect: false
-        });
-        awaitingResponse = true;
-    } else {
-        const command = message.body.toLowerCase().trim();
-        switch (command) {
-            case 'text':
-                await botBaileys.sendText(message.from, 'Hello world');
-                break;
-            case 'media':
-                await botBaileys.sendMedia(message.from, 'https://www.w3schools.com/w3css/img_lights.jpg', 'Hello world');
-                break;
-            case 'file':
-                await botBaileys.sendFile(message.from, 'https://github.com/pedrazadixon/sample-files/raw/main/sample_pdf.pdf');
-                break;
-            case 'sticker':
-                await botBaileys.sendSticker(message.from, 'https://gifimgs.com/animations/anime/dragon-ball-z/Goku/goku_34.gif', { pack: 'User', author: 'Me' });
-                break;
-            default:
-                await botBaileys.sendText(message.from, 'Sorry, I did not understand that command. Please select an option from the poll.');
-                break;
-        }
-        awaitingResponse = false;
-    }
-});
-```
+## Performance
 
-### Acknowledgements
+- Multi-stage Docker build (smaller image)
+- Alpine Linux base (~150MB image)
+- Efficient state management
+- Auto-cleanup of expired sessions
 
-This project was inspired by ideas and code from the [bot-whatsapp](https://github.com/codigoencasa/bot-whatsapp) repository by codigoencasa. Their work on creating automated conversation flows and setting up automated responses for frequently asked questions was particularly influential. We appreciate their contributions to the open-source community and their work on WhatsApp bot development.
+## License
+
+MIT
+
+## Author
+
+Modified for picky eater education flow - 2026
+
+Original library: @bot-wa/bot-wa-baileys
 
 
-### Contribution
-If you want to contribute to this project, feel free to do so. Any type of improvement, bug fix or new features are welcome.
+# Jalankan via docker-compose (recommended)
+docker compose up -d
 
-### Licencia
-
-This project is licensed under the [MIT](LICENSE).
-
+# Atau langsung via docker run
+docker run -d \
+  -p 3000:3000 \
+  -v ./auth_info_baileys:/app/auth_info_baileys \
+  -v ./state:/app/state \
+  --name whatsapp-chatbot \
+  bot-wa-stunting:latest

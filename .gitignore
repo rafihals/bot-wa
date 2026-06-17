@@ -5,3 +5,16 @@ core.class.log
 db.json
 lib/
 *.qr.png
+
+# VSCode MCP config (contains API tokens)
+.vscode/mcp.json
+
+# Local IDE config
+.vscode/
+
+# OS files
+.DS_Store
+
+# Termux scripts (local use)
+setup-termux.sh
+bot-wa.zip

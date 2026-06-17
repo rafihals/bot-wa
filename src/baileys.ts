@@ -1,5 +1,5 @@
 import { EventEmitter } from "events";
-import pino, { Logger } from "pino";
+import pino from "pino";
 import NodeCache from "node-cache";
 import makeWASocket, {
   DisconnectReason,
@@ -14,6 +14,7 @@ import makeWASocket, {
   WAMessageKey,
 } from "@whiskeysockets/baileys";
 import { readFileSync, existsSync, rmSync } from "fs";
+import { createHash } from "crypto";
 
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
@@ -60,6 +61,13 @@ export class BaileysClass extends EventEmitter {
   private sock: any;
   private NAME_DIR_SESSION: string;
   private plugin: boolean;
+  // Store poll creation messages with their options for decoding poll responses
+  private pollMessages: Map<string, { message: any, options: string[] }> = new Map();
+
+  // Helper to compute SHA256 hash of option name (how WhatsApp identifies selected options)
+  private hashPollOption(optionName: string): string {
+    return createHash('sha256').update(optionName).digest().toString('hex');
+  }
 
   constructor(args = {}) {
     super();
@@ -85,10 +93,24 @@ export class BaileysClass extends EventEmitter {
   getMessage = async (
     key: WAMessageKey
   ): Promise<WAMessageContent | undefined> => {
-    if (this.store) {
-      const msg = await this.store.loadMessage(key.remoteJid, key.id);
-      return msg?.message || undefined;
+    // First check our poll messages cache
+    if (key.id && this.pollMessages.has(key.id)) {
+      const pollData = this.pollMessages.get(key.id);
+      console.log(`📊 getMessage: Found poll message in cache for ${key.id}`);
+      console.log(`   Poll options: ${pollData?.options?.join(', ')}`);
+      return pollData?.message;
     }
+    
+    // Then check the store
+    if (this.store) {
+      const msg = await this.store.loadMessage(key.remoteJid!, key.id!);
+      if (msg?.message) {
+        console.log(`📊 getMessage: Found message in store for ${key.id}`);
+        return msg.message;
+      }
+    }
+    
+    console.log(`⚠️ getMessage: Message not found for ${key.id}`);
     // only if store is present
     return proto.Message.fromObject({});
   };
@@ -96,7 +118,7 @@ export class BaileysClass extends EventEmitter {
   getInstance = (): any => this.vendor;
 
   initBailey = async (): Promise<void> => {
-    const logger: Logger = pino({
+    const logger = pino({
       level: this.globalVendorArgs.debug ? "debug" : "fatal",
     });
     const { state, saveCreds } = await useMultiFileAuthState(
@@ -107,7 +129,7 @@ export class BaileysClass extends EventEmitter {
     if (this.globalVendorArgs.debug)
       console.log(`using WA v${version.join(".")}, isLatest: ${isLatest}`);
 
-    this.store = makeInMemoryStore({ logger });
+    this.store = makeInMemoryStore({ logger: logger as any });
     this.store.readFromFile(`${this.NAME_DIR_SESSION}/baileys_store.json`);
     setInterval(() => {
       const path = `${this.NAME_DIR_SESSION}/baileys_store.json`;
@@ -126,17 +148,23 @@ export class BaileysClass extends EventEmitter {
   setUpBaileySock = async ({ version, logger, state, saveCreds }) => {
     this.sock = makeWASocket({
       version,
-      logger,
+      logger: logger as any,
       printQRInTerminal:
         this.plugin || this.globalVendorArgs.usePairingCode ? false : true,
       auth: {
         creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, logger),
+        keys: makeCacheableSignalKeyStore(state.keys, logger as any),
       },
       browser: Browsers.macOS("Desktop"),
       msgRetryCounterCache,
       generateHighQualityLinkPreview: true,
       getMessage: this.getMessage,
+      defaultQueryTimeoutMs: undefined, // Disable default timeout
+      syncFullHistory: false, // CRITICAL: Disable history sync to prevent getUSyncDevices timeout
+      retryRequestDelayMs: 250,
+      fireInitQueries: false, // Disable initial queries that cause timeout
+      shouldIgnoreJid: (jid: string) => jid === 'status@broadcast',
+      connectTimeoutMs: 60000,
     });
 
     this.store?.bind(this.sock.ev);
@@ -272,11 +300,114 @@ export class BaileysClass extends EventEmitter {
   busEvents = (): any[] => [
     {
       event: "messages.upsert",
-      func: ({ messages, type }) => {
-        // Ignore notify messages
-        if (type !== "notify") return;
+      func: async ({ messages, type }) => {
+        // Ignore non-notify messages
+        if (type !== "notify") {
+          console.log(`🔇 Ignoring message type: ${type}`);
+          return;
+        }
 
         const [messageCtx] = messages;
+        
+        // Debug: Log raw message
+        console.log(`\n📥 RAW MESSAGE RECEIVED:`);
+        console.log(`   remoteJid: ${messageCtx?.key?.remoteJid}`);
+        console.log(`   fromMe: ${messageCtx?.key?.fromMe}`);
+        console.log(`   hasConversation: ${!!messageCtx?.message?.conversation}`);
+        console.log(`   hasExtendedText: ${!!messageCtx?.message?.extendedTextMessage}`);
+        console.log(`   hasPollUpdate: ${!!messageCtx?.message?.pollUpdateMessage}`);
+
+        // Handle pollUpdateMessage - decode poll response using SHA256 hash matching
+        if (messageCtx.message?.pollUpdateMessage) {
+          const pollUpdate = messageCtx.message.pollUpdateMessage;
+          const pollMsgKey = pollUpdate?.pollCreationMessageKey;
+          
+          console.log(`\n📊 POLL RESPONSE RECEIVED (messages.upsert)!`);
+          console.log(`   Poll creation message ID: ${pollMsgKey?.id}`);
+          console.log(`   From: ${messageCtx?.key?.remoteJid}`);
+          console.log(`   pollMessages cache size: ${this.pollMessages.size}`);
+          console.log(`   pollMessages keys: ${Array.from(this.pollMessages.keys()).join(', ')}`);
+          
+          const from = messageCtx?.key?.remoteJid;
+          
+          // Ignore group poll responses
+          if (from?.includes("@g.us")) {
+            console.log(`🔇 Ignoring group poll response from: ${from}`);
+            return;
+          }
+          
+          // Try to find poll in cache
+          let pollData: { message: any; options: string[] } | undefined = undefined;
+          
+          // First try exact match
+          if (pollMsgKey?.id && this.pollMessages.has(pollMsgKey.id)) {
+            pollData = this.pollMessages.get(pollMsgKey.id);
+            console.log(`   Found poll by exact ID match`);
+          } else {
+            // Fallback: search all polls (in case ID format differs)
+            console.log(`   Exact ID not found, searching all cached polls...`);
+            for (const [key, data] of this.pollMessages.entries()) {
+              console.log(`   Checking poll: ${key}`);
+              pollData = data;
+              break; // Use the most recent poll as fallback
+            }
+          }
+          
+          if (pollData) {
+            try {
+              const options = pollData.options || [];
+              
+              console.log(`   Stored poll options: ${options.join(', ')}`);
+              
+              // Get selected option hashes from vote
+              // selectedOptions is an array of Buffers containing SHA256 hashes
+              const selectedHashes: string[] = [];
+              if (pollUpdate?.vote?.selectedOptions) {
+                for (const opt of pollUpdate.vote.selectedOptions) {
+                  if (opt) {
+                    // Convert Buffer to hex string
+                    const hashHex = Buffer.isBuffer(opt) ? opt.toString('hex') : 
+                                   (opt instanceof Uint8Array ? Buffer.from(opt).toString('hex') : String(opt));
+                    selectedHashes.push(hashHex);
+                  }
+                }
+              }
+              console.log(`   Selected hashes: ${selectedHashes.map(h => h.substring(0, 16) + '...').join(', ')}`);
+              
+              // Match selected hashes with our stored options
+              let selectedOption = '';
+              for (const optionName of options) {
+                const optionHash = this.hashPollOption(optionName);
+                console.log(`   Checking: "${optionName}" -> ${optionHash.substring(0, 16)}...`);
+                if (selectedHashes.some(h => h === optionHash)) {
+                  selectedOption = optionName;
+                  console.log(`   ✅ MATCHED: "${optionName}"`);
+                  break;
+                }
+              }
+              
+              if (selectedOption) {
+                let payload = {
+                  ...messageCtx,
+                  body: selectedOption,
+                  from: utils.formatPhone(from, this.plugin),
+                  type: "poll",
+                };
+                
+                console.log(`✅ EMITTING poll response - from: ${payload.from}, body: "${payload.body}"`);
+                this.emit("message", payload);
+              } else {
+                console.log(`⚠️ No matching option found for selected hashes`);
+              }
+            } catch (error) {
+              console.error(`❌ Error processing poll response:`, error);
+            }
+          } else {
+            console.log(`⚠️ Poll creation message not found in cache for ID: ${pollMsgKey?.id}`);
+          }
+          return;
+        }
+
         let payload = {
           ...messageCtx,
           body:
@@ -286,14 +417,25 @@ export class BaileysClass extends EventEmitter {
           type: "text",
         };
 
-        // Ignore pollUpdateMessage
-        if (messageCtx.message?.pollUpdateMessage) return;
+        console.log(`   extracted body: "${payload.body}"`);
 
         // Ignore broadcast messages
-        if (payload.from === "status@broadcast") return;
+        if (payload.from === "status@broadcast") {
+          console.log(`🔇 Ignoring status broadcast`);
+          return;
+        }
 
         // Ignore messages from self
-        if (payload?.key?.fromMe) return;
+        if (payload?.key?.fromMe) {
+          console.log(`🔇 Ignoring message from self`);
+          return;
+        }
+
+        // Ignore group messages - only respond to personal chats
+        if (payload.from?.includes("@g.us")) {
+          console.log(`🔇 Ignoring group message from: ${payload.from}`);
+          return;
+        }
 
         // Detect location
         if (messageCtx.message?.locationMessage) {
@@ -339,6 +481,7 @@ export class BaileysClass extends EventEmitter {
 
         // Check from user and group is valid
         if (!utils.formatPhone(payload.from)) {
+          console.log(`🔇 Ignoring: invalid phone format`);
           return;
         }
 
@@ -350,33 +493,111 @@ export class BaileysClass extends EventEmitter {
         if (listRowId) payload.body = listRowId;
 
         payload.from = utils.formatPhone(payload.from, this.plugin);
+        console.log(`✅ EMITTING message event - from: ${payload.from}, body: "${payload.body}"`);
         this.emit("message", payload);
       },
     },
     {
       event: "messages.update",
       func: async (message) => {
+        console.log(`\n📬 messages.update EVENT TRIGGERED`);
+        console.log(`   Total updates: ${message.length}`);
+        
         for (const { key, update } of message) {
+          console.log(`   Update for ${key.remoteJid}:`);
+          console.log(`   - message ID: ${key.id}`);
+          console.log(`   - has pollUpdates: ${!!update.pollUpdates}`);
+          console.log(`   - update keys: ${Object.keys(update).join(', ')}`);
+          
+          // Ignore group messages
+          if (key.remoteJid?.includes("@g.us")) {
+            console.log(`🔇 Ignoring group poll update from: ${key.remoteJid}`);
+            continue;
+          }
+          
           if (update.pollUpdates) {
-            const pollCreation = await this.getMessage(key);
-            if (pollCreation) {
-              const pollMessage = await getAggregateVotesInPollMessage({
-                message: pollCreation,
-                pollUpdates: update.pollUpdates,
-              });
-              const [messageCtx] = message;
+            console.log(`\n📊 POLL UPDATE DETECTED`);
+            console.log(`   remoteJid: ${key.remoteJid}`);
+            console.log(`   messageId: ${key.id}`);
+            console.log(`   pollMessages cache size: ${this.pollMessages.size}`);
+            console.log(`   pollMessages keys: ${Array.from(this.pollMessages.keys()).join(', ')}`);
+            
+            try {
+              const pollCreation = await this.getMessage(key);
+              console.log(`   pollCreation found: ${!!pollCreation}`);
+              console.log(`   pollCreation type: ${pollCreation ? typeof pollCreation : 'null'}`);
+              
+              if (pollCreation && pollCreation.pollCreationMessage) {
+                console.log(`   ✅ Valid pollCreationMessage structure found`);
+                
+                const pollMessage = await getAggregateVotesInPollMessage({
+                  message: pollCreation,
+                  pollUpdates: update.pollUpdates,
+                });
+                
+                console.log(`   pollMessage votes:`, pollMessage.map(p => ({ name: p.name, voters: p.voters.length })));
 
-              let payload = {
-                ...messageCtx,
-                body:
-                  pollMessage.find((poll) => poll.voters.length > 0)?.name ||
-                  "",
-                from: utils.formatPhone(key.remoteJid, this.plugin),
-                voters: pollCreation,
-                type: "poll",
-              };
+                const selectedOption = pollMessage.find((poll) => poll.voters.length > 0)?.name || "";
+                console.log(`   Selected option: "${selectedOption}"`);
 
-              this.emit("message", payload);
+                if (selectedOption) {
+                  let payload = {
+                    ...message[0],
+                    body: selectedOption,
+                    from: utils.formatPhone(key.remoteJid, this.plugin),
+                    voters: pollCreation,
+                    type: "poll",
+                  };
+
+                  console.log(`✅ EMITTING poll response - from: ${payload.from}, body: "${payload.body}"`);
+                  this.emit("message", payload);
+                } else {
+                  console.log(`⚠️ No selected option found in poll votes`);
+                }
+              } else {
+                // Fallback: Try to use hash matching from our cache
+                console.log(`⚠️ pollCreationMessage structure invalid, trying hash matching fallback`);
+                
+                if (key.id && this.pollMessages.has(key.id)) {
+                  const pollData = this.pollMessages.get(key.id);
+                  const options = pollData?.options || [];
+                  
+                  // Get voters from pollUpdates
+                  for (const pollUpdate of update.pollUpdates) {
+                    if (pollUpdate.vote?.selectedOptions?.length > 0) {
+                      const selectedHashes: string[] = [];
+                      for (const opt of pollUpdate.vote.selectedOptions) {
+                        if (opt) {
+                          const hashHex = Buffer.isBuffer(opt) ? opt.toString('hex') : 
+                                         (opt instanceof Uint8Array ? Buffer.from(opt).toString('hex') : String(opt));
+                          selectedHashes.push(hashHex);
+                        }
+                      }
+                      
+                      // Match hash to option
+                      for (const optionName of options) {
+                        const optionHash = this.hashPollOption(optionName);
+                        if (selectedHashes.some(h => h === optionHash)) {
+                          let payload = {
+                            ...message[0],
+                            body: optionName,
+                            from: utils.formatPhone(key.remoteJid, this.plugin),
+                            type: "poll",
+                          };
+                          
+                          console.log(`✅ EMITTING poll response (hash fallback) - from: ${payload.from}, body: "${payload.body}"`);
+                          this.emit("message", payload);
+                          return;
+                        }
+                      }
+                    }
+                  }
+                } else {
+                  console.log(`⚠️ Poll message not found in cache for ID: ${key.id}`);
+                }
+              }
+            } catch (error) {
+              console.error(`❌ Error processing poll update:`, error);
             }
           }
         }
@@ -488,9 +709,37 @@ export class BaileysClass extends EventEmitter {
    * @param {string} message
    * @returns
    */
-  sendText = async (number: string, message: string): Promise<any> => {
+  sendText = async (number: string, message: string, retries = 3): Promise<any> => {
+    // Validate connection state before sending
+    if (!this.vendor) {
+      console.error('Bot not connected. Skipping message send.');
+      return null;
+    }
+
     const numberClean = utils.formatPhone(number);
-    return this.vendor.sendMessage(numberClean, { text: message });
+    
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        return await this.vendor.sendMessage(numberClean, { text: message });
+      } catch (error: any) {
+        const errorMsg = error?.message || error?.toString() || 'Unknown error';
+        console.error(`[${attempt}/${retries}] Send text failed to ${numberClean}: ${errorMsg}`);
+        
+        // Don't retry on certain errors
+        if (errorMsg.includes('Timed Out') || errorMsg.includes('closed') || errorMsg.includes('Session')) {
+          console.error('Non-retryable error detected. Aborting send.');
+          return null;
+        }
+        
+        if (attempt === retries) {
+          console.error(`Failed to send message after ${retries} attempts. Giving up.`);
+          return null; // Return null instead of throwing to prevent crash
+        }
+        
+        // Wait before retry (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, attempt * 1500));
+      }
+    }
   };
 
   /**
@@ -556,8 +805,15 @@ export class BaileysClass extends EventEmitter {
   sendPoll = async (
     number: string,
     text: string,
-    poll: any
-  ): Promise<boolean> => {
+    poll: any,
+    retries = 3
+  ): Promise<any> => {
+    // Validate connection state before sending
+    if (!this.vendor) {
+      console.error('Bot not connected. Skipping poll send.');
+      return false;
+    }
+
     const numberClean = utils.formatPhone(number);
 
     if (poll.options.length < 2) return false;
@@ -567,7 +823,63 @@ export class BaileysClass extends EventEmitter {
       values: poll.options,
       selectableCount: 1,
     };
-    return this.vendor.sendMessage(numberClean, { poll: pollMessage });
+    
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const result = await this.vendor.sendMessage(numberClean, { poll: pollMessage });
+        
+        // Store poll creation message WITH OPTIONS for later decoding poll responses
+        if (result?.key?.id) {
+          console.log(`📊 Poll sent - storing message for ID: ${result.key.id}`);
+          console.log(`   Options stored: ${poll.options.join(', ')}`);
+          
+          // Create proper pollCreationMessage structure for getAggregateVotesInPollMessage
+          const pollCreationMessage = {
+            pollCreationMessage: {
+              name: text,
+              options: poll.options.map((opt: string) => ({ optionName: opt })),
+              selectableOptionsCount: 1
+            }
+          };
+          
+          this.pollMessages.set(result.key.id, {
+            message: pollCreationMessage,
+            options: poll.options  // Store the original options for hash matching
+          });
+          
+          // Also store in the in-memory store if available
+          if (this.store) {
+            // Bind the message to store manually
+            this.store.messages[numberClean] = this.store.messages[numberClean] || [];
+          }
+          
+          // Clean up old poll messages after 24 hours
+          setTimeout(() => {
+            this.pollMessages.delete(result.key.id);
+          }, 24 * 60 * 60 * 1000);
+        }
+        
+        return result;
+      } catch (error: any) {
+        const errorMsg = error?.message || error?.toString() || 'Unknown error';
+        console.error(`[${attempt}/${retries}] Send poll failed to ${numberClean}: ${errorMsg}`);
+        
+        // Don't retry on certain errors
+        if (errorMsg.includes('Timed Out') || errorMsg.includes('closed') || errorMsg.includes('Session')) {
+          console.error('Non-retryable error detected. Aborting poll send.');
+          return false;
+        }
+        
+        if (attempt === retries) {
+          console.error(`Failed to send poll after ${retries} attempts. Giving up.`);
+          return false;
+        }
+        
+        // Wait before retry (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, attempt * 1500));
+      }
+    }
+    return false;
   };
 
   /**
